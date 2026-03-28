@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>下肢動作カウンター Pro Max ver5.1</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background-color: #000;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-family: 'Arial Black', 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif;
+            color: white;
+        }
+
+        .container { position: relative; width: 100%; height: 100%; overflow: hidden; }
+        video { display: none; }
+        canvas { 
+            position: absolute;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh; 
+            object-fit: cover; 
+            transform: scaleX(-1); 
+            opacity: 0.2; 
+        }
+
+        /* ヘッダー周りの統合 */
+        .ui-header {
+            position: absolute;
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 98%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 150;
+        }
+
+        .header-side {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            width: 25%;
+        }
+
+        .info-box {
+            background: rgba(0,0,0,0.8);
+            padding: 8px 15px;
+            border-radius: 12px;
+            font-size: clamp(18px, 3vh, 32px); 
+            border: 3px solid;
+            font-weight: 900;
+            text-align: center;
+        }
+        #score-display { color: #00ffcc; border-color: #00ffcc; }
+        #timer-display { color: #ff3366; border-color: #ff3366; }
+
+        #camera-status {
+            font-size: clamp(12px, 1.8vh, 18px);
+            padding: 4px 10px;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.85);
+            text-align: center;
+            font-weight: 900;
+            border: 2px solid;
+        }
+        .status-red { color: #ff3333; border-color: #ff3333; }
+        .status-yellow { color: #ffff00; border-color: #ffff00; }
+        .status-pink { color: #ff66cc; border-color: #ff66cc; }
+        .status-green { color: #00ff00; border-color: #00ff00; }
+
+        /* 中央のタイトル・ガイド */
+        .header-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 48%;
+            pointer-events: none;
+        }
+
+        .overlay-title {
+            font-size: clamp(20px, 3.5vh, 45px);
+            margin: 0;
+            text-shadow: 0 0 15px #000;
+            white-space: nowrap;
+        }
+
+        .overlay-guide {
+            font-size: clamp(14px, 1.8vh, 22px);
+            color: #00ff00;
+            margin-top: 2px;
+            background: rgba(0,0,0,0.7);
+            padding: 2px 15px;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+
+        .btn-start {
+            margin-top: 5px;
+            padding: 8px 25px;
+            font-size: 18px;
+            background: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            font-weight: bold;
+            pointer-events: auto;
+            box-shadow: 0 0 20px rgba(255,0,0,0.5);
+        }
+
+        #result-screen {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 200;
+            text-align: center;
+            background: rgba(0,0,0,0.9);
+            padding: 40px;
+            border-radius: 30px;
+            border: 5px solid #ffcc00;
+        }
+
+        /* カウンターグリッドの拡大 */
+        #counter-grid {
+            position: absolute;
+            bottom: 1%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 98%;
+            height: 82vh; 
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 20;
+            pointer-events: none;
+        }
+
+        .counter-row { display: flex; gap: 10px; justify-content: center; flex: 1; }
+
+        .counter-item {
+            flex: 1;
+            background: rgba(30, 30, 30, 0.95);
+            border: 4px solid #555;
+            border-radius: 15px;
+            display: flex;
+            flex-direction: column; 
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+            transition: all 0.1s;
+        }
+
+        .counter-item.active {
+            border-color: #00ff00;
+            background: rgba(0, 255, 0, 0.3);
+            transform: scale(1.03);
+        }
+
+        .label {
+            font-size: clamp(16px, 2.8vh, 32px); 
+            color: #0f0;
+            text-align: center;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .count-val {
+            font-size: clamp(60px, 18vh, 220px); /* カウント数字を巨大化 */
+            color: #fff;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+            line-height: 0.9;
+            font-weight: 900;
+        }
+
+        .item-front { border-color: #3399ff; }
+        .item-side { border-color: #ffcc00; }
+        .item-in { border-color: #ffffff; }
+        .item-back { border-color: #ff6600; }
+        .item-special { border-color: #ff33ff; }
+        .item-heel { border-color: #00ffcc; }
+
+        #status-msg {
+            position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,255,0,0.8); color: #000; padding: 5px 15px;
+            border-radius: 20px; font-size: 16px; z-index: 60; display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <video id="input_video" playsinline></video>
+        <canvas id="output_canvas"></canvas>
+        <div id="status-msg">READY</div>
+
+        <div class="ui-header">
+            <div class="header-side">
+                <div id="score-display" class="info-box">SCORE: <span id="val-score">0</span></div>
+                <div id="camera-status">全身を映してください</div>
+            </div>
+
+            <div class="header-center" id="start-screen">
+                <h1 class="overlay-title">下肢動作カウンター</h1>
+                <p class="overlay-guide">片手をあげて下げるとスタート！</p>
+                <button class="btn-start" onclick="initApp()">カメラ起動</button>
+            </div>
+
+            <div class="header-side">
+                <div id="timer-display" class="info-box">TIME: <span id="val-timer">60</span></div>
+            </div>
+        </div>
+
+        <div id="result-screen" style="display: none;">
+            <h1 class="overlay-title" id="finish-text" style="color: #ffcc00; font-size: 80px;">FINISH!</h1>
+            <p class="overlay-guide" style="font-size: 30px;">手をあげて戻すとリスタート</p>
+        </div>
+
+        <div id="counter-grid">
+            <div class="counter-row">
+                <div id="box-ひだりまえ" class="counter-item item-front"><div class="label">ひだりまえ</div><div class="count-val" id="cnt-ひだりまえ">0</div></div>
+                <div id="box-かかとあげ" class="counter-item item-heel"><div class="label">かかとあげ</div><div class="count-val" id="cnt-かかとあげ">0</div></div>
+                <div id="box-みぎまえ" class="counter-item item-front"><div class="label">みぎまえ</div><div class="count-val" id="cnt-みぎまえ">0</div></div>
+            </div>
+            <div class="counter-row">
+                <div id="box-ひだりそと" class="counter-item item-side"><div class="label">ひだりそと</div><div class="count-val" id="cnt-ひだりそと">0</div></div>
+                <div id="box-ひだりうち" class="counter-item item-in"><div class="label">ひだりうち</div><div class="count-val" id="cnt-ひだりうち">0</div></div>
+                <div id="box-みぎうち" class="counter-item item-in"><div class="label">みぎうち</div><div class="count-val" id="cnt-みぎうち">0</div></div>
+                <div id="box-みぎそと" class="counter-item item-side"><div class="label">みぎそと</div><div class="count-val" id="cnt-みぎそと">0</div></div>
+            </div>
+            <div class="counter-row">
+                <div id="box-ひだりうしろ" class="counter-item item-back"><div class="label">ひだりうしろ</div><div class="count-val" id="cnt-ひだりうしろ">0</div></div>
+                <div id="box-りょうあし" class="counter-item item-special"><div class="label">りょうあし</div><div class="count-val" id="cnt-りょうあし">0</div></div>
+                <div id="box-みぎうしろ" class="counter-item item-back"><div class="label">みぎうしろ</div><div class="count-val" id="cnt-みぎうしろ">0</div></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const cameraStatusEl = document.getElementById('camera-status');
+        
+        const actionCounts = {
+            "ひだりまえ": 0, "みぎまえ": 0, "ひだりそと": 0, "みぎそと": 0,
+            "ひだりうち": 0, "みぎうち": 0,
+            "ひだりうしろ": 0, "みぎうしろ": 0, "りょうあし": 0, "かかとあげ": 0
+        };
+
+        let score = 0, timeLeft = 60, gameActive = false;
+        let waitingForNeutral = false, isWaitingForReturn = false;
+        let needsResetAfterEnd = false; 
+        let timerInterval = null, appInitialized = false, lastEndTime = 0;
+
+        const LEG_THRESHOLD_RATIO = 0.82; 
+        const KNEE_LIFT_THRESHOLD = 0.08; 
+        const KNEE_STAY_THRESHOLD = 0.045; 
+        const SIDE_STEP_THRESHOLD = 0.12; 
+        const MAX_ANKLE_LATERAL_LIMIT = 0.08; 
+
+        let initialHipAnkleDistL = 0, initialHipAnkleDistR = 0;
+        let initialKneeY_L = 0, initialKneeY_R = 0;
+        let initialAnkleY_L = 0, initialAnkleY_R = 0;
+        let initialnose = 0;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playSound(freq, duration) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.value = freq;
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function recordBasePosition(lm) {
+            initialHipAnkleDistL = Math.abs(lm[27].y - lm[23].y);
+            initialHipAnkleDistR = Math.abs(lm[28].y - lm[24].y);
+            initialKneeY_L = lm[25].y; initialKneeY_R = lm[26].y;
+            initialAnkleY_L = lm[27].y; initialAnkleY_R = lm[28].y;
+            initialnose = lm[0].y;              
+
+            const msg = document.getElementById('status-msg');
+            msg.innerText = "CALIBRATED";
+            msg.style.display = 'block';
+            setTimeout(() => msg.style.display = 'none', 1000);
+        }
+
+        function triggerRealStart(lm) {
+            recordBasePosition(lm);
+            gameActive = true; 
+            waitingForNeutral = false; 
+            isWaitingForReturn = false;
+            needsResetAfterEnd = false;
+            score = 0; timeLeft = 60;
+            
+            Object.keys(actionCounts).forEach(key => {
+                actionCounts[key] = 0;
+                document.getElementById(`cnt-${key}`).innerText = "0";
+            });
+            document.getElementById('val-score').innerText = "0";
+            document.getElementById('val-timer').innerText = "60";
+            document.getElementById('start-screen').style.visibility = 'hidden';
+            document.getElementById('result-screen').style.display = 'none';
+            document.getElementById('finish-text').innerText = "FINISH!";
+            
+            playSound(880, 0.4);
+
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                document.getElementById('val-timer').innerText = timeLeft;
+                if (timeLeft <= 0) endGame();
+            }, 1000);
+        }
+
+        function endGame(isManual = false) {
+            gameActive = false; 
+            clearInterval(timerInterval);
+            lastEndTime = Date.now();
+            if (isManual) document.getElementById('finish-text').innerText = "RESET!";
+            needsResetAfterEnd = true; 
+            document.getElementById('result-screen').style.display = 'block';
+            playSound(440, 0.6);
+        }
+
+        function incrementCount(action) {
+            if(!actionCounts.hasOwnProperty(action)) return;
+            actionCounts[action]++;
+            score++;
+            document.getElementById(`cnt-${action}`).innerText = actionCounts[action];
+            document.getElementById('val-score').innerText = score;
+            const box = document.getElementById(`box-${action}`);
+            box.classList.add('active');
+            setTimeout(() => box.classList.remove('active'), 300);
+            playSound(1200, 0.1);
+            isWaitingForReturn = true; 
+        }
+
+        function updateCameraStatus(lm) {
+            if (!lm) {
+                cameraStatusEl.innerText = "顔、足が映像外";
+                cameraStatusEl.className = "status-red";
+                return;
+            }
+            const nose = lm[0];
+            const lAnkle = lm[31];
+            const rAnkle = lm[32];
+
+            const isNoseIn = (nose.y > 0 && nose.y < 1) && (nose.x > 0 && nose.x < 1) && nose.visibility > 0.5;
+            const isLAnkleIn = (lAnkle.y > 0 && lAnkle.y < 1) && (lAnkle.x > 0 && lAnkle.x < 1) && lAnkle.visibility > 0.5;
+            const isRAnkleIn = (rAnkle.y > 0 && rAnkle.y < 1) && (rAnkle.x > 0 && rAnkle.x < 1) && rAnkle.visibility > 0.5;
+            const areAnklesIn = isLAnkleIn && isRAnkleIn;
+
+            if (!isNoseIn && !areAnklesIn) {
+                cameraStatusEl.innerText = "顔・足 映像外";
+                cameraStatusEl.className = "status-red";
+            } else if (!isNoseIn && areAnklesIn) {
+                cameraStatusEl.innerText = "顔 映像外";
+                cameraStatusEl.className = "status-yellow";
+            } else if (isNoseIn && !areAnklesIn) {
+                cameraStatusEl.innerText = "足 映像外";
+                cameraStatusEl.className = "status-pink";
+            } else {
+                cameraStatusEl.innerText = "OK";
+                cameraStatusEl.className = "status-green";
+            }
+        }
+
+        function onResults(results) {
+            canvasElement.width = results.image.width;
+            canvasElement.height = results.image.height;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.poseLandmarks) {
+                const lm = results.poseLandmarks;
+                drawConnectors(canvasCtx, lm, POSE_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+                updateCameraStatus(lm);
+
+                const nose = lm[0], lWrist = lm[15], rWrist = lm[16];
+                const lAnkle = lm[27], rAnkle = lm[28], lKnee = lm[25], rKnee = lm[26], lHip = lm[23], rHip = lm[24];
+                const lHandUp = lWrist.y < nose.y, rHandUp = rWrist.y < nose.y;
+
+                if (gameActive && (lHandUp || rHandUp)) {
+                    endGame(true);
+                }
+                if (needsResetAfterEnd && !lHandUp && !rHandUp) {
+                    needsResetAfterEnd = false;
+                }
+                if (!gameActive && !waitingForNeutral && !needsResetAfterEnd && (lHandUp || rHandUp)) {
+                    if (Date.now() - lastEndTime > 1500) {
+                        waitingForNeutral = true;
+                    }
+                }
+                if (waitingForNeutral && !lHandUp && !rHandUp) {
+                    triggerRealStart(lm);
+                }
+
+                if (gameActive) {
+                    const currentDistL = Math.abs(lAnkle.y - lHip.y);
+                    const currentDistR = Math.abs(rAnkle.y - rHip.y);
+                    const midHipX = (lHip.x + rHip.x) / 2;
+                    
+                    const lAnkleOffset = lAnkle.x - midHipX; 
+                    const rAnkleOffset = midHipX - rAnkle.x;
+                    
+                    const lKneeOffset = lKnee.x - midHipX; 
+                    const rKneeOffset = midHipX - rKnee.x;
+
+                    
+
+                    const isLFootBent = currentDistL < (initialHipAnkleDistL * LEG_THRESHOLD_RATIO);
+                    const isRFootBent = currentDistR < (initialHipAnkleDistR * LEG_THRESHOLD_RATIO);
+                    const isLKneeLifted = lKnee.y < (initialKneeY_L - KNEE_LIFT_THRESHOLD);
+                    const isRKneeLifted = rKnee.y < (initialKneeY_R - KNEE_LIFT_THRESHOLD);
+                    const isLKneeStatic = Math.abs(lKnee.y - initialKneeY_L) < KNEE_STAY_THRESHOLD;
+                    const isRKneeStatic = Math.abs(rKnee.y - initialKneeY_R) < KNEE_STAY_THRESHOLD;
+
+                    const shankDist = (Math.abs(initialAnkleY_L - initialnose) + Math.abs(initialAnkleY_R - initialnose)) / 2;
+                    const hThreshold = shankDist / 25;
+                    const isHeelRaised = (initialnose - lm[0].y) > hThreshold && Math.abs(lKnee.y - rKnee.y) < 0.04;
+                    const isLAnkleinside = rAnkle.x > lAnkle.x && rHip.x > lAnkle.x;
+                    const isRAnkleinside = rAnkle.x > lAnkle.x && lHip.x < rAnkle.x;
+
+
+
+                    if (isWaitingForReturn) {
+                        if (!isLFootBent && !isRFootBent && isLKneeStatic && isRKneeStatic && !isHeelRaised && !isLAnkleinside && !isRAnkleinside) {
+                            isWaitingForReturn = false;
+                        }
+                    } else {
+                        if (isLFootBent && isRFootBent) {
+                            incrementCount("りょうあし");
+                        } else if (isLFootBent) {
+                            if (isLKneeLifted && lAnkleOffset < MAX_ANKLE_LATERAL_LIMIT && lm[25].z < -0.1) {
+                                incrementCount("ひだりまえ");
+                            } else if (lAnkleOffset > SIDE_STEP_THRESHOLD) {
+                                incrementCount("ひだりそと");
+                            } else if (isLKneeStatic && lm[25].z > 0 && lm[27].z > 0.2 && lm[27].y < lm[28].y - 0.05 && lAnkleOffset < 0.075 && lKneeOffset < 0.07 && rAnkle.x < lAnkle.x) {
+                                incrementCount("ひだりうしろ");
+                            }
+                        } else if (isRFootBent) {
+                            if (isRKneeLifted && rAnkleOffset < MAX_ANKLE_LATERAL_LIMIT && lm[26].z < -0.1) {
+                                incrementCount("みぎまえ");
+                            } else if (rAnkleOffset > SIDE_STEP_THRESHOLD) {
+                                incrementCount("みぎそと");
+                            } else if (isRKneeStatic && lm[26].z > 0 && lm[28].z > 0.2 && lm[27].y - 0.05 > lm[28].y && rAnkleOffset < 0.075 && rKneeOffset < 0.07 && rAnkle.x < lAnkle.x) {
+                                incrementCount("みぎうしろ");
+                            }
+                        } else if (isHeelRaised) {
+                            incrementCount("かかとあげ");                                           
+                        
+                        } else if (isLAnkleinside) { 
+                                incrementCount("ひだりうち");
+                        } else if (isRAnkleinside) { 
+                                incrementCount("みぎうち");
+  
+                        }
+
+
+                  }
+                }
+            } else {
+                updateCameraStatus(null);
+            }
+            canvasCtx.restore();
+        }
+
+        const pose = new Pose({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+        pose.setOptions({ modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        pose.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await pose.send({image: videoElement}); },
+            width: 1280, height: 720
+        });
+
+        function initApp() {
+            if (appInitialized) return;
+            audioCtx.resume(); appInitialized = true;
+            document.querySelector('.btn-start').style.display = 'none';
+            camera.start();
+        }
+    </script>
+</body>
+</html>
